@@ -443,6 +443,70 @@ describe("rematch", () => {
     c2.disconnect();
   });
 
+  test("rematch allows both players to make moves with swapped colors and rejects moves before start", async () => {
+    const { c1, c2, roomCode } = await playToFinish();
+
+    // 1. Move before rematch has started must be rejected
+    const earlyMove = await emitWithAck(c1, "make-move", { roomCode, column: 0 });
+    assert.equal(earlyMove.success, false);
+    assert.ok(earlyMove.message.includes("not in progress"));
+
+    // 2. c1 requests rematch, c2 receives notification
+    const requestPromise = waitForEvent(c2, "rematch-request");
+    await emitWithAck(c1, "rematch-request", { roomCode });
+    const reqNotification = await requestPromise;
+    assert.equal(reqNotification.from, "Alice");
+
+    // 3. Listen for player-assigned events and game-state
+    const c1AssignedPromise = waitForEvent(c1, "player-assigned");
+    const c2AssignedPromise = waitForEvent(c2, "player-assigned");
+    const c1StatePromise = waitForEvent(c1, "game-state");
+
+    // c2 accepts rematch
+    const acceptAck = await emitWithAck(c2, "rematch-accepted", { roomCode });
+    assert.equal(acceptAck.success, true);
+    assert.equal(acceptAck.color, "R"); // Bob is now R
+
+    const c1Assigned = await c1AssignedPromise;
+    const c2Assigned = await c2AssignedPromise;
+    assert.equal(c1Assigned.color, "Y"); // Alice is now Y
+    assert.equal(c2Assigned.color, "R"); // Bob is now R
+
+    const freshState = await c1StatePromise;
+    assert.equal(freshState.status, "playing");
+    assert.equal(freshState.currentTurn, "R");
+    assert.equal(freshState.totalMoves, 0);
+    assert.equal(freshState.winner, null);
+
+    // 4. Alice (c1, now Y) tries to move first — rejected (wrong turn)
+    const wrongTurnMove = await emitWithAck(c1, "make-move", { roomCode, column: 2 });
+    assert.equal(wrongTurnMove.success, false);
+    assert.ok(wrongTurnMove.message.includes("not your turn"));
+
+    // 5. Bob (c2, now R) makes the first move in column 3 — accepted!
+    const c1AfterBobMovePromise = waitForEvent(c1, "game-state");
+    const bobMove = await emitWithAck(c2, "make-move", { roomCode, column: 3 });
+    assert.equal(bobMove.success, true);
+
+    const stateAfterBob = await c1AfterBobMovePromise;
+    assert.equal(stateAfterBob.board[5][3], "R");
+    assert.equal(stateAfterBob.currentTurn, "Y");
+    assert.equal(stateAfterBob.totalMoves, 1);
+
+    // 6. Alice (c1, now Y) makes the second move in column 3 — accepted!
+    const c2AfterAliceMovePromise = waitForEvent(c2, "game-state");
+    const aliceMove = await emitWithAck(c1, "make-move", { roomCode, column: 3 });
+    assert.equal(aliceMove.success, true);
+
+    const stateAfterAlice = await c2AfterAliceMovePromise;
+    assert.equal(stateAfterAlice.board[4][3], "Y");
+    assert.equal(stateAfterAlice.currentTurn, "R");
+    assert.equal(stateAfterAlice.totalMoves, 2);
+
+    c1.disconnect();
+    c2.disconnect();
+  });
+
   test("rematch-accepted fails if opponent disconnected", async () => {
     const { c1, c2, roomCode } = await playToFinish();
 

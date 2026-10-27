@@ -33,18 +33,42 @@ export default function App() {
     function onRoomUpdated(state) {
       setGameState(state);
       if (state?.roomCode) setRoomCode(state.roomCode);
-      if (state.status === "playing") {
+      if (state?.status === "playing") {
         setScreen("game");
+        if (state?.myColor) {
+          setMyColor(state.myColor);
+        } else if (name && state?.players) {
+          if (state.players.R?.name === name && state.players.Y?.name !== name) {
+            setMyColor("R");
+          } else if (state.players.Y?.name === name && state.players.R?.name !== name) {
+            setMyColor("Y");
+          }
+        }
       }
     }
 
     function onGameState(state) {
       setGameState(state);
       if (state?.roomCode) setRoomCode(state.roomCode);
-      if (state.status === "playing") {
+      if (state?.status === "playing") {
         setScreen("game");
         setRematchOfferedByOpponent(false);
         setRematchRequestedByMe(false);
+        if (state?.myColor) {
+          setMyColor(state.myColor);
+        } else if (name && state?.players) {
+          if (state.players.R?.name === name && state.players.Y?.name !== name) {
+            setMyColor("R");
+          } else if (state.players.Y?.name === name && state.players.R?.name !== name) {
+            setMyColor("Y");
+          }
+        }
+      }
+    }
+
+    function onPlayerAssigned({ color }) {
+      if (color) {
+        setMyColor(color);
       }
     }
 
@@ -61,6 +85,7 @@ export default function App() {
     socket.on("disconnect", onDisconnect);
     socket.on("room-updated", onRoomUpdated);
     socket.on("game-state", onGameState);
+    socket.on("player-assigned", onPlayerAssigned);
     socket.on("rematch-request", onRematchRequest);
     socket.on("player-disconnected", onPlayerDisconnected);
 
@@ -69,17 +94,31 @@ export default function App() {
       socket.off("disconnect", onDisconnect);
       socket.off("room-updated", onRoomUpdated);
       socket.off("game-state", onGameState);
+      socket.off("player-assigned", onPlayerAssigned);
       socket.off("rematch-request", onRematchRequest);
       socket.off("player-disconnected", onPlayerDisconnected);
     };
-  }, []);
+  }, [name]);
 
   // ── Actions ──
 
   const handleCreateRoom = () => {
     setError("");
+    if (!socket.connected) {
+      setError(
+        "Cannot connect to the backend server. If using a free Render server, it may take 40-50s to wake up from sleep. Check the top-right status dot."
+      );
+      return;
+    }
+
     setLoading(true);
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError("Server request timed out. Please check your backend connection or refresh.");
+    }, 10000);
+
     socket.emit("create-room", { name: name.trim() }, (res) => {
+      clearTimeout(timer);
       setLoading(false);
       if (res && res.success) {
         setRoomCode(res.roomCode);
@@ -93,8 +132,21 @@ export default function App() {
 
   const handleJoinRoom = (code) => {
     setError("");
+    if (!socket.connected) {
+      setError(
+        "Cannot connect to the backend server. If using a free Render server, it may take 40-50s to wake up from sleep. Check the top-right status dot."
+      );
+      return;
+    }
+
     setLoading(true);
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setError("Server request timed out. Please check your backend connection or refresh.");
+    }, 10000);
+
     socket.emit("join-room", { roomCode: code, name: name.trim() }, (res) => {
+      clearTimeout(timer);
       setLoading(false);
       if (res && res.success) {
         setRoomCode(res.roomCode || code);
@@ -143,8 +195,12 @@ export default function App() {
   const handleAcceptRematch = () => {
     const activeCode = roomCode || gameState?.roomCode;
     socket.emit("rematch-accepted", { roomCode: activeCode }, (res) => {
-      if (res && !res.success) {
-        setError(res.message);
+      if (res && res.success) {
+        if (res.color) setMyColor(res.color);
+        setRematchOfferedByOpponent(false);
+        setRematchRequestedByMe(false);
+      } else if (res && !res.success) {
+        setError(res.message || "Failed to accept rematch.");
       }
     });
   };

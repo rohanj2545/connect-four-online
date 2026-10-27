@@ -1,27 +1,55 @@
 import React, { useEffect, useState } from "react";
+import { SERVER_URL } from "../socket";
 
 export default function MatchHistory({ onBack }) {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const serverUrl = import.meta.env.VITE_SERVER_URL || "http://localhost:3000";
-
   useEffect(() => {
-    fetch(`${serverUrl}/api/matches`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load match history");
-        return res.json();
-      })
-      .then((data) => {
-        setMatches(data.matches || []);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, [serverUrl]);
+    let isMounted = true;
+
+    async function loadMatches() {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const res = await fetch(`${SERVER_URL}/api/matches`);
+        if (!res.ok) {
+          let errorMsg = `Server returned status ${res.status} (${res.statusText || "Error"})`;
+          try {
+            const errJson = await res.json();
+            if (errJson?.error) {
+              errorMsg = errJson.error;
+            }
+          } catch (_) {
+            // Not a JSON error body
+          }
+          throw new Error(errorMsg);
+        }
+
+        const data = await res.json();
+        if (!isMounted) return;
+
+        if (data && Array.isArray(data.matches)) {
+          setMatches(data.matches);
+        } else {
+          throw new Error("Invalid response format: 'matches' array is missing.");
+        }
+      } catch (err) {
+        if (!isMounted) return;
+        setError(err.message || "Failed to load match history.");
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    loadMatches();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <div className="match-history-card glass-panel">
@@ -36,8 +64,7 @@ export default function MatchHistory({ onBack }) {
 
       {error && (
         <div className="history-error">
-          <p>{error}</p>
-          <small>Make sure MongoDB is connected and backend server is running.</small>
+          <p className="error-text">⚠️ {error}</p>
         </div>
       )}
 

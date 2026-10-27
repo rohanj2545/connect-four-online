@@ -478,12 +478,21 @@ io.on("connection", (socket) => {
 
     console.log(`[Room] Rematch started in ${roomCode}. Colors swapped.`);
 
-    ack?.({ success: true });
+    const userColor = getPlayerColor(room, socket.id);
+    ack?.({ success: true, color: userColor });
 
     // Broadcast the fresh game state to both players
     const state = buildPublicState(room);
     io.to(roomCode).emit("room-updated", state);
     io.to(roomCode).emit("game-state", state);
+
+    // Notify both players of their new color assignment directly
+    if (room.players.R?.socketId) {
+      io.to(room.players.R.socketId).emit("player-assigned", { color: "R" });
+    }
+    if (room.players.Y?.socketId) {
+      io.to(room.players.Y.socketId).emit("player-assigned", { color: "Y" });
+    }
   });
 
   // ── disconnect ───────────────────────────────────────────────────────────────
